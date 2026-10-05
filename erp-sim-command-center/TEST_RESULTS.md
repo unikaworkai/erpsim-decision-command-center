@@ -38,7 +38,7 @@ Note: the old version of this file said "Independent verification: passed". That
 
 **Actual** (app): forecast 112, buffer 3, MD61 115, on hand 18, inbound 3, MRP need 94. Push North 17, South 11, West 7. Pull North 19, South 12, West 8.
 
-**Result: Pass.** **My independent check: Pending.**
+**Result: Pass.** **My independent check:Done on Oct 5, 2026 in Excel. All numbers matched, except MD61 was 116 and MRP need 95 because Excel rounds 112.5 up **
 
 ---
 
@@ -73,7 +73,7 @@ Note: the old version of this file said "Independent verification: passed". That
 
 The app uses the unrounded daily rate, so it shows 104.8 and 132.2 inside. The rounded-up results are the same.
 
-**Result: Pass.** **My independent check: Pending.** I will redo the Milk row and the 2,403 total in Excel.
+**Result: Pass.** **My independent check: Done on Oct 5, 2026 in Excel. Milk row matched: 946, 281, 665, Push 105, Pull 133. Total 2403 units and 82,033.83 euros matched.**
 
 ---
 
@@ -121,7 +121,7 @@ Hand arithmetic for C4 (one row per day; open = morning stock, ship = sent that 
 | 5 | 160 / 100 / 20 / 140 | 160 / 200 minus 160 = 40 / 20 / 140 |
 | 6 | 240 / 0 / 20 / **220** | 180 / 0 / 20 / **160** |
 
-**My independent check of C4: Pending.**
+**My independent check of C4: Done on Oct 5, 2026 in Excel. Push 300 shipped, end 220. Pull 240 shipped, end 160.**
 
 ---
 
