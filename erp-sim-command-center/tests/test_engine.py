@@ -5,6 +5,8 @@ from statistics import pstdev
 
 from src.engine import PRODUCTS, _number, _code, _file_report, build_plan, load_data
 
+BASE = Path(__file__).resolve().parents[1] / 'data' / 'baseline'  # was /Users/unikamaharjan/Downloads (only worked on one Mac)
+
 
 def sample_data():
     totals=defaultdict(lambda: defaultdict(float)); days=defaultdict(set); regions=defaultdict(float)
@@ -52,21 +54,21 @@ class EngineTests(unittest.TestCase):
         self.assertIsNone(_code('CC-T09'))
 
     def test_report_detection_from_columns(self):
-        self.assertEqual(_file_report('/Users/unikamaharjan/Downloads/SalesExportData.xlsx'),'detailed_sales')
-        self.assertEqual(_file_report('/Users/unikamaharjan/Downloads/ExportData (1).xlsx'),'inventory')
-        self.assertEqual(_file_report('/Users/unikamaharjan/Downloads/purchase order round 8 ExportData.xlsx'),'purchase_orders')
+        self.assertEqual(_file_report(BASE/'SalesExportData.xlsx'),'detailed_sales')
+        self.assertEqual(_file_report(BASE/'ExportData (1).xlsx'),'inventory')
+        self.assertEqual(_file_report(BASE/'purchase order round 8 ExportData.xlsx'),'purchase_orders')
 
     def test_independent_verification_of_round_9_milk_forecast(self):
         # Independently read raw sales and recompute the 20/30/50 weighted forecast.
         from openpyxl import load_workbook
-        src=Path('/Users/unikamaharjan/Downloads/O data for all the rounds.xlsx')
+        src=Path(BASE/'O data for all the rounds.xlsx')
         rows=list(load_workbook(src,data_only=True,read_only=True)['Sales'].values)
         header=rows[0]; qi=header.index('QUANTITY'); pi=header.index('MATERIAL_NUMBER'); ri=header.index('SIM_ROUND')
         byround={r:0 for r in (6,7)}
         for row in rows[1:]:
             if str(row[pi]).endswith('T01') and int(row[ri]) in byround: byround[int(row[ri])]+=float(row[qi])
         # Round 8 detail export is independently aggregated.
-        x=load_workbook('/Users/unikamaharjan/Downloads/SalesExportData.xlsx',data_only=True,read_only=True).active
+        x=load_workbook(BASE/'SalesExportData.xlsx',data_only=True,read_only=True).active
         h, *data=list(x.values); qi=h.index('Quantity'); pi=h.index('Material'); ri=h.index('Round')
         byround[8]=sum(float(row[qi] or 0) for row in data if str(row[pi]).endswith('T01') and int(row[ri])==8)
         expected=round(byround[6]*.2+byround[7]*.3+byround[8]*.5)

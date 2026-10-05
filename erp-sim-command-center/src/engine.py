@@ -9,6 +9,8 @@ import re
 
 from openpyxl import load_workbook
 
+from src import transfer_policy
+
 PRODUCTS = [
     {"code": f"CC-T{i:02d}", "suffix": f"T{i:02d}", "name": n, "cost": c}
     for i, (n, c) in enumerate([
@@ -122,6 +124,22 @@ def _file_report(path):
     return "unknown"
 
 
+def _explain_unknown(path):
+    """Plain reason why an uploaded workbook was not used, plus which report it seems to be."""
+    try:
+        sheets = _detect_sheet_rows(path)
+    except Exception as exc:  # unreadable or not really .xlsx
+        return "unreadable", f"the file could not be opened as an Excel workbook ({type(exc).__name__})"
+    headers = set()
+    for _name, hdrs in sheets:
+        headers |= {re.sub(r"[^a-z0-9]+", "_", str(h or "").strip().lower()).strip("_") for h in hdrs}
+    looks_inventory = {"location", "material"} <= headers or {"storage_location", "material_number"} <= headers
+    if looks_inventory and not ({"stock"} & headers or {"current_inventory"} & headers):
+        return "inventory", "it looks like a ZMB52 inventory export but has no Stock column"
+    shown = ", ".join(sorted(h for h in headers if h)[:8]) or "no column headers"
+    return "unknown", f"its columns ({shown}) do not match any ERPsim report the app knows"
+
+
 def load_data(upload_dir=None):
     """Read the provided baseline workbooks, then apply matching uploaded exports."""
     paths = default_files()
@@ -135,7 +153,14 @@ def load_data(upload_dir=None):
             if typ != "unknown":
                 paths[typ] = path
 
+    rejected = []
+    for path, typ in uploaded:
+        if typ == "unknown":
+            kind, reason = _explain_unknown(path)
+            rejected.append({"file": path.name, "looks_like": kind, "reason": reason})
+
     data = {
+        "rejected_uploads": rejected,
         "sales": [], "inventory": {}, "inbound": defaultdict(float), "prices": {},
         "valuations": [], "financial": {}, "regional_round_sales": defaultdict(float),
         "round_totals": defaultdict(lambda: defaultdict(float)), "round_days": defaultdict(set),
@@ -244,11 +269,22 @@ def load_data(upload_dir=None):
         data["financial"]={"profit":total_profit,"gross_profit":gross_profit,"revenue":revenue,"cash":cash,"through_round":latest_round,"through_day":latest_step}
         data["has_financial"]=True
     if "inventory" in paths and paths["inventory"] != base:
-        data["inventory"] = {}
+        data["inventory"] = {}; bad_cells = 0
         for r in _rows(paths["inventory"]):
             c = _code(r.get("Material") or r.get("MATERIAL_NUMBER")); loc = str(r.get("Location") or r.get("STORAGE_LOCATION") or "")
-            if c: data["inventory"][(c, loc)] = _number(r.get("Stock") or r.get("STOCK"))
+            raw = r.get("Stock") if r.get("Stock") is not None else r.get("STOCK")
+            if c and raw not in (None, "") and _number(raw, None) is None:
+                bad_cells += 1
+            if c: data["inventory"][(c, loc)] = _number(raw)
         data["has_inventory"] = bool(data["inventory"])
+        if bad_cells:
+            # Do not turn unreadable stock into zero; that would invent a purchase need.
+            data["rejected_uploads"].append({"file": Path(paths["inventory"]).name, "looks_like": "inventory",
+                                             "reason": f"{bad_cells} Stock value(s) are not numbers"})
+    if any(r["looks_like"] == "inventory" for r in data["rejected_uploads"]):
+        # You tried to give new stock but it could not be read: withhold stock-based numbers
+        # instead of quietly using the older packaged inventory.
+        data["inventory"] = {}; data["has_inventory"] = False
     if "purchase_orders" in paths and paths["purchase_orders"] != base:
         # Current transaction export can supplement the historic schedule, keyed to avoid double counting.
         prior = {(c, round(q, 4)) for c, q in data["inbound"].items()}
@@ -315,7 +351,10 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
     inventory_valid = data["has_inventory"] and not replay
     inbound_valid = data["has_po"] and not replay
     last_value = data["valuations"][-1] if data["valuations"] else None
-    if transfer_mode == "auto": transfer_mode = "PULL" if round_count >= 2 else "PUSH"
+    # Transfer mode is resolved after all products are calculated (see policy comparison below).
+    # Before this fix, "auto" became PULL/PUSH here and the mode was never used again.
+    requested_mode = str(transfer_mode or "auto").upper()
+    if requested_mode not in {"AUTO", "PUSH", "PULL"}: requested_mode = "AUTO"
     if frequency is None: frequency = 2 if round_count >= 3 else 3
     frequency = max(1, int(frequency))
     rows = []
@@ -359,15 +398,13 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
         regional_totals = {reg: sum(data["regional_round_sales"].get((r, code, reg), 0) for r in recent) for reg in REGIONS}
         reg_sum = sum(regional_totals.values())
         shares = {reg: (regional_totals[reg]/reg_sum if reg_sum else 1/3) for reg in REGIONS}
-        transfers = None
+        transfers = None; entries = None
         if reg_stock is not None and central is not None:
-            needs = {reg: max(0, math.ceil(daily * frequency * shares[reg] + buffer*shares[reg] - reg_stock[reg])) for reg in REGIONS}
-            # The transfer decision follows ME59N in the workflow. Quantities may therefore use
-            # the planned receipt, but remain conditional on that PO arriving as expected.
-            available = max(0, central + (inbound or 0) + (mrp or 0))
-            transfers = {}
-            for reg in REGIONS:
-                qty = min(needs[reg], available); transfers[reg] = qty; available -= qty
+            # ZMB1B entries differ by mode (course definitions, guide slides 13-14):
+            # PUSH = quantity sent every cycle, PULL = target level kept in each region.
+            # The old code always used one formula (target minus regional stock) for every mode.
+            # Entering that net number as a Pull target would subtract regional stock twice.
+            entries = transfer_policy.zmb1b_entries(daily, frequency, shares, buffer)
         if price is not None:
             rec_price = price
             pricing_reason = "Hold the observed one-price-per-product list; supplied history does not establish a reliable price response."
@@ -398,25 +435,50 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
                      "price_reason": pricing_reason, "price_confidence": price_conf,
                      "expected_revenue": expected_revenue, "expected_gross_profit": expected_profit,
                      "expected_end_inventory": projected_end, "risk": risk,
-                     "regional_shares": shares, "transfers": transfers,
+                     "regional_shares": shares, "transfers": transfers, "zmb1b": entries,
                      "valuation_impact": "Directional only; official lookup table missing."})
-    total_po = sum(r["po_value"] or 0 for r in rows)
-    total_qty = sum(r["po_qty"] or 0 for r in rows)
+    # Compare PUSH and PULL on the same demand path, then resolve the mode.
+    policy = None
+    if all(r["zmb1b"] is not None for r in rows) and rows:
+        sim_products = [{
+            "code": r["code"], "name": r["product"], "central": r["central"] or 0,
+            "regional": r["regional_stock"], "inbound": r["inbound"] or 0, "new_po": r["mrp"] or 0,
+            "daily_by_region": {reg: r["daily"] * r["regional_shares"][reg] for reg in REGIONS},
+            "entries": r["zmb1b"], "price": r["price"], "unit_cost": r["cost_basis"],
+        } for r in rows]
+        policy = transfer_policy.compare(sim_products, frequency)
+    if requested_mode == "AUTO":
+        transfer_mode = (policy["recommended"] if policy and policy["recommended"] else "PULL")
+        mode_source = ("Auto: recommended by the Push/Pull comparison" if policy and policy["recommended"]
+                       else "Auto: no real difference found, Pull kept as default" if policy
+                       else "Auto: comparison needs current inventory")
+    else:
+        transfer_mode = requested_mode; mode_source = "Chosen by you in the sidebar"
+    for r in rows:
+        r["transfers"] = r["zmb1b"][transfer_mode] if r["zmb1b"] else None
+    # If any product's need is unknown (no usable inventory), the total is unknown too.
+    # Summing None as 0 used to show "0 units", which looks like "buy nothing".
+    if all(r["po_qty"] is not None for r in rows):
+        total_po = sum(r["po_value"] for r in rows); total_qty = sum(r["po_qty"] for r in rows)
+    else:
+        total_po = None; total_qty = None
     expected_revenue = sum(r["expected_revenue"] or 0 for r in rows) if all(r["expected_revenue"] is not None for r in rows) else None
     expected_gross_profit = sum(r["expected_gross_profit"] or 0 for r in rows) if all(r["expected_gross_profit"] is not None for r in rows) else None
     expected_end_inventory = sum(r["expected_end_inventory"] or 0 for r in rows) if all(r["expected_end_inventory"] is not None for r in rows) else None
     current_value = last_value["value"] if last_value else None
     finance = data["financial"]
     central_units = sum(q for (c, loc), q in data["inventory"].items() if loc == "03") if inventory_valid else None
-    projected_central = (central_units + sum(data["inbound"].values()) + total_qty) if central_units is not None and inbound_valid else None
+    projected_central = (central_units + sum(data["inbound"].values()) + total_qty) if central_units is not None and inbound_valid and total_qty is not None else None
     return {"target_round": target_round, "through_round": max(complete_rounds, default=0),
             "historical_rounds": complete_rounds, "replay": replay, "mode": transfer_mode,
+            "requested_mode": requested_mode, "mode_source": mode_source, "policy": policy,
             "frequency": frequency, "protection_horizon": frequency+3,
             "rows": rows, "products": len(rows), "purchase_value": total_po, "purchase_qty": total_qty,
             "expected_revenue": expected_revenue, "expected_gross_profit": expected_gross_profit,
             "expected_margin": (expected_gross_profit/expected_revenue if expected_revenue else None),
             "expected_end_inventory": expected_end_inventory,
-            "fixed_po_cost": 1000 if total_qty else 0,
+            "fixed_po_cost": None if total_qty is None else (1000 if total_qty else 0),
+            "rejected_uploads": data.get("rejected_uploads", []),
             "warehouse_units": round(central_units) if central_units is not None else None,
             "warehouse_utilization": (central_units/4000) if central_units is not None else None,
             "projected_warehouse_units": round(projected_central) if projected_central is not None else None,

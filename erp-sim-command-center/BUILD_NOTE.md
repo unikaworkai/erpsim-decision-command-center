@@ -1,35 +1,33 @@
-# Build note
+# Build note: ERPsim Decision Command Center
 
-## Concise game-rules summary
+**Purpose and user.** I am Pricing Lead on a five-person team in ERPsim Logistics Extended. Between rounds we have a few minutes to decide MD61 quantities, Push or Pull transfers, and prices. The data for this is spread across several SAP reports. This app turns our exports into one plan that we type into SAP ourselves. It never connects to SAP.
 
-- Six finished products are identified by material suffixes T01–T06; one price per product applies across the three regional storage locations.
-- Central warehouse is storage `03`; North, South and West are `03N`, `03S` and `03W`.
-- Supplied workbook rules list V04 lead time of 1–2 virtual days, a €1,000 purchase-order cost, €100 per inter-storage transfer, 4,000 units of main capacity, €300/day per additional 1,000 units, customer payment after 4 days and supplier payment after 5 days.
-- Sales, stock, inbound POs and prices must be read as separate facts. MD61 is the demand-planning target; MD01's expected net requirement is reduced by current stock and open inbound orders.
-- An incomplete round must not be treated as a zero-demand round. This build uses rounds with sales through day 10 as complete.
-- Forecast confidence uses completed-round count and a simple one-round-back error screen; it does not account for historical stockouts, regional availability or price changes.
-- Company valuation is an objective, but the brief's formula references an official credit-rating / risk-rate lookup not supplied in the attachments. Only the actual valuation series is therefore displayed.
+**Inputs and outputs.**
+- **Inputs:** our SAP exports (OData workbook, detailed sales, ZMB52 inventory, ZME2N POs, valuation), packaged or uploaded, plus the planning round, transfer mode and cycle days.
+- **Outputs:**
+  - the MD61 target and expected MRP need for each product;
+  - ZMB1B entries for each region;
+  - a Push vs Pull recommendation with two reasons, the main risk and what would change it;
+  - prices and a downloadable decision sheet.
 
-## Data inspected
+**Revision 1: readable text.** The KPI cards were white on white on my Mac (dark mode, 1.04:1 contrast), and the sidebar dropdowns were white on white in light mode (1.00:1). The cause was a missing theme file plus CSS that painted everything in the sidebar white. I added a fixed light theme at the repo root, which is the only place Streamlit Cloud reads it. I also replaced the broad CSS with narrow rules that set text and background together, and removed misleading green up arrows from the KPIs. After the fix, the worst contrast on all 10 pages is 5.05:1.
 
-The all-round source contains daily sales through round 7, inventory movements through round 8, purchase-order rows through round 7, financial postings through round 7, transfer records, current supplier prices, current price conditions, a current inventory KPI, current inventory, and a `Current_Game_Rules` tab. The supplied detail sales workbook extends observed sales through round 8, day 10. The summary sales export includes day 1 of round 9; that partial round is detected and excluded from forecasts. The valuation export continues through round 8, day 10. The separately supplied current inventory and round-8 PO export have no open PO quantities (all PO lines show Delivered). Financial postings and detailed sales are marked Outdated against the partial round-9 summary; inventory is explicitly flagged as undated.
+**Revision 2: Push/Pull did nothing.** Switching the mode gave identical numbers. In the code, the mode was read and then never used. One formula was applied to every mode, and in Pull mode that formula would subtract regional stock twice.
+- I rebuilt this to follow the course definitions: Push sends a fixed quantity every cycle, and Pull keeps a target level.
+- The app now simulates both modes over the round on the same demand and recommends one.
+- The purchase plan correctly stays the same in both modes, and the page now says why.
+- With our data the app recommends Pull: about €985 more gross profit after transfer fees.
 
-The SAP screenshots were inspected: the financial statement shows round-end income statement totals; the stock transfer screen shows a push-mode allocation grid and 5-day schedule; the valuation graph shows an actual rising historical series; the pricing-condition screen shows one wholesale price list for each of six products. The screenshot images were not used as machine-readable data inputs.
+**Three checks** (details in TEST_RESULTS.md):
 
-## Architecture
+| Check | Expected | Actual |
+|---|---|---|
+| Known example: sales of 100 and 120, stock 18, inbound 3 | Forecast 112.5, buffer 3, MRP need 94 (95 with Excel rounding) | 112, 3, 94. Pass |
+| Realistic: our Round 9 data | No negative needs, Cream 0, same purchases in both modes, Push and Pull transfers differ | 2,403 units in both modes. Milk North Push 105, Pull 133. Pass |
+| Invalid: inventory file with no Stock column | Clear message, no misleading numbers, no crash | Before: silently ignored (Fail). After: named error, "Pending", stock numbers withheld. Pass |
 
-- `app.py`: Python standard-library local HTTP server, JSON API, upload endpoint and round snapshot save.
-- `src/engine.py`: `.xlsx` reading, round selection, deterministic forecasts, MRP netting, transfer allocation and output data.
-- `static/index.html`, `styles.css`, `app.js`: responsive Fiori-inspired browser interface with decision pages, CSV download, upload, copy and snapshot controls.
-- `game_rules.yaml`: transcribed source rules and explicit unknowns.
-- `tests/test_engine.py`: known-example, realistic source-data, invalid-input and independent formula checks.
+**Independent verification:** Pending. I will redo the known example and the Milk row of the realistic example in Excel. One difference is already known: Python rounds 112.5 down to 112, while Excel rounds it up to 113.
 
-## Purposeful revisions
+**One limitation.** The forecast uses observed sales. When a region was out of stock, true demand is hidden, so the forecast and the Push/Pull comparison can understate demand. The inventory export also has no date, so I must check it against SAP first.
 
-1. The first forecast pass considered only an average. It was revised to weight newer completed rounds more heavily and to exclude rounds without day-10 data, reducing stale-history influence and incomplete-period distortion.
-2. The first transfer idea allocated target stock directly. It was revised to subtract regional inventory and cap actual dispatch at central stock, preventing the app from recommending goods the warehouse does not hold.
-3. Historical replay initially reused current inventory and PO snapshots. It was revised to suppress those undated snapshots during replay to prevent future-state leakage.
-
-## Known limitation
-
-No referenced participant guide, job aid, assignment documents, current financial report export, or valuation credit-rating lookup was attached. Forecast buffers, transfer-cycle choice and demand-weighting are transparent planning assumptions; they are not claimed as official game rules. Phase 1 does not correct regional sales for past stockouts, so regional shares may understate censored demand. Inventory lacks an embedded date, so the user must verify synchronization. The app is a decision aid and does not connect to SAP or execute transactions.
+**How AI helped vs what I did.** OpenAI Codex built the first version. Claude (Anthropic) did Revisions 1 and 2 after I hit my Codex limit. It traced the bugs, wrote the fixes and tests, and measured contrast in a browser. I defined the problems, chose the course rules to follow, decided what counts as correct (including keeping equal purchase numbers), and am doing the independent checks. I make all game decisions. I have asked the instructor whether Claude-assisted revisions meet the "Build with Codex" requirement.

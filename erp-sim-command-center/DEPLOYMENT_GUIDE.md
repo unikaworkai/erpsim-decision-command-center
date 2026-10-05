@@ -62,7 +62,7 @@ The project folder you copy from is:
    |---|---|
    | Repository | `unikaworkai/erpsim-decision-command-center` |
    | Branch | `main` |
-   | Main file path | `streamlit_app.py` |
+   | Main file path | `erp-sim-command-center/streamlit_app.py` |
    | App URL | `erpsim-command-center-unika` or another available simple name |
 
 7. Click **Advanced settings** and select Python 3.12 if Streamlit asks. The app dependencies are already listed in `requirements.txt`.
@@ -91,7 +91,7 @@ The project folder you copy from is:
 
 ## If something fails
 
-- **Streamlit cannot find the file:** check that the main file path is exactly `streamlit_app.py`.
+- **Streamlit cannot find the file:** check that the main file path is exactly `erp-sim-command-center/streamlit_app.py`. Theme settings must be in `.streamlit/config.toml` at the repo root.
 - **Streamlit says a library is missing:** make sure `requirements.txt` was committed and pushed.
 - **The page opens but reports no data:** make sure the `data/baseline/` folder was included when you committed the project.
 - **Professor is asked to sign in:** use the app menu in Streamlit Community Cloud and change the app sharing setting to public. Do not change the GitHub source repository to public just to solve this.
