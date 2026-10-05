@@ -1,0 +1,28 @@
+# Rules transcribed from Current_Game_Rules in O data for all the rounds.xlsx.
+# This file is a reference record; unsupported rules remain explicitly unknown.
+products:
+  - {suffix: T01, name: Milk, reference_cost_eur: 22.95}
+  - {suffix: T02, name: Cream, reference_cost_eur: 72.07}
+  - {suffix: T03, name: Yoghurt, reference_cost_eur: 25.85}
+  - {suffix: T04, name: Cheese, reference_cost_eur: 82.68}
+  - {suffix: T05, name: Butter, reference_cost_eur: 59.88}
+  - {suffix: T06, name: Ice Cream, reference_cost_eur: 43.15}
+storage_locations:
+  main: "03"
+  north: "03N"
+  south: "03S"
+  west: "03W"
+supplier: {code: V04, name: Dairy Cooperative, lead_time_virtual_days: "1-2"}
+costs:
+  purchase_order_eur: 1000
+  inter_storage_transfer_eur: 100
+  warehouse_capacity_units: 4000
+  extra_capacity_step_units: 1000
+  extra_capacity_cost_eur_per_day: 300
+payment_terms:
+  customer_receipt_virtual_days: 4
+  supplier_payment_virtual_days: 5
+unknown:
+  company_valuation_credit_rating_lookup: "Not present in provided attachments"
+  market_and_company_risk_rates: "Not present in provided attachments"
+  course_guide_and_job_aid: "Referenced in brief, not attached"

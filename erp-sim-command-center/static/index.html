@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ERPsim Decision Command Center</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">E</div><div><b>ERPSIM</b><small>LOGISTICS EXTENDED</small></div></div>
+    <div class="workspace-label">WORKSPACE</div>
+    <nav id="navigation">
+      <button class="nav-item active" title="Command center" data-page="command"><span class="nav-icon">⌂</span> Command center</button>
+      <button class="nav-item" title="Final round plan" data-page="final"><span class="nav-icon">✓</span> Final round plan</button>
+      <button class="nav-item" title="Forecast + MRP" data-page="forecast"><span class="nav-icon">◷</span> Forecast + MRP</button>
+      <button class="nav-item" title="Procurement" data-page="procurement"><span class="nav-icon">⇢</span> Procurement</button>
+      <button class="nav-item" title="Stock transfer" data-page="transfer"><span class="nav-icon">⇄</span> Stock transfer</button>
+      <button class="nav-item" title="Pricing" data-page="pricing"><span class="nav-icon">€</span> Pricing</button>
+      <button class="nav-item" title="Finance + valuation" data-page="finance"><span class="nav-icon">↗</span> Finance + valuation</button>
+      <button class="nav-item" title="Round review" data-page="review"><span class="nav-icon">▤</span> Round review</button>
+      <button class="nav-item" title="Data center" data-page="data"><span class="nav-icon">▦</span> Data center <span id="missing-count" class="nav-count"></span></button>
+      <button class="nav-item" title="Game rules" data-page="rules"><span class="nav-icon">ⓘ</span> Game rules</button>
+    </nav>
+    <div class="sidebar-bottom"><div class="local-dot"></div><span>Local workspace</span><span class="privacy">PRIVATE</span></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="crumb">ERPsim <span>/</span> Logistics Extended</div><div class="top-actions"><span id="updated-label">Waiting for source data</span><button class="avatar">U</button></div></header>
+    <div id="app" class="content"><div class="loading">Loading your ERPsim data…</div></div>
+    <footer>ERPsim DECISION COMMAND CENTER <span>Planning support only · SAP decisions are entered manually</span></footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
