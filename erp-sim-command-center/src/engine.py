@@ -141,23 +141,30 @@ def _explain_unknown(path):
 
 
 def _finance(rows):
-    """Profit, revenue, cash from financial postings, plus cumulative profit at the end of each round."""
-    total_profit = gross_profit = revenue = cash = 0.0; latest_round = latest_step = 0
-    per_round = defaultdict(float)
+    """Profit, revenue, gross profit and bank cash from financial postings, totals and per round.
+    The per-round values are cumulative to the END of each round, so a past planning round can show
+    the figures that existed at that time."""
+    keys = ("profit", "revenue", "gross_profit", "cash")
+    total = dict.fromkeys(keys, 0.0); per_round = defaultdict(lambda: dict.fromkeys(keys, 0.0))
+    latest_round = latest_step = 0
     for r in rows:
-        amt = _number(r.get("AMOUNT")); lvl = str(r.get("FS_LEVEL_1") or ""); acc = str(r.get("GL_ACCOUNT_NAME") or "")
-        rnd = _round(r.get("SIM_ROUND")) or 0
+        amt = _number(r.get("AMOUNT")); lvl = str(r.get("FS_LEVEL_1") or ""); lvl2 = str(r.get("FS_LEVEL_2") or "")
+        acc = str(r.get("GL_ACCOUNT_NAME") or ""); rnd = _round(r.get("SIM_ROUND")) or 0
+        delta = dict.fromkeys(keys, 0.0)
         if lvl == "Income Statement":
-            total_profit -= amt; per_round[rnd] -= amt
-        if lvl == "Income Statement" and str(r.get("FS_LEVEL_2")) == "Revenues": revenue -= amt
-        if lvl == "Income Statement" and str(r.get("FS_LEVEL_2")) in {"Revenues", "Cost of Goods Sold"}: gross_profit -= amt
-        if acc == "Bank Cash Account": cash += amt
+            delta["profit"] -= amt
+            if lvl2 == "Revenues": delta["revenue"] -= amt
+            if lvl2 in {"Revenues", "Cost of Goods Sold"}: delta["gross_profit"] -= amt
+        if acc == "Bank Cash Account": delta["cash"] += amt
+        for k in keys:
+            total[k] += delta[k]; per_round[rnd][k] += delta[k]
         latest_round = max(latest_round, rnd); latest_step = max(latest_step, _round(r.get("SIM_STEP")) or 0)
-    cumulative, running = {}, 0.0
+    cumulative, running = {}, dict.fromkeys(keys, 0.0)
     for rnd in sorted(per_round):
-        running += per_round[rnd]; cumulative[rnd] = running
-    return {"profit": total_profit, "gross_profit": gross_profit, "revenue": revenue, "cash": cash,
-            "through_round": latest_round, "through_day": latest_step, "profit_by_round": cumulative}
+        for k in keys: running[k] += per_round[rnd][k]
+        cumulative[rnd] = dict(running)
+    return {**total, "through_round": latest_round, "through_day": latest_step,
+            "profit_by_round": {r: v["profit"] for r, v in cumulative.items()}, "by_round": cumulative}
 
 
 def load_data(upload_dir=None):
@@ -516,9 +523,12 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
     by_round = finance.get("profit_by_round") or {}
     known = [r for r in by_round if r <= as_of_round]
     if known:
-        finance["profit"] = by_round[max(known)]; finance["through_round"] = max(known)
+        upto = max(known)
+        finance.update((finance.get("by_round") or {}).get(upto, {}))   # profit, revenue, gross profit, cash
+        finance["profit"] = by_round[upto]; finance["through_round"] = upto
     elif by_round:
-        finance["profit"] = None; finance["through_round"] = None
+        for k in ("profit", "revenue", "gross_profit", "cash"): finance[k] = None
+        finance["through_round"] = None
     central_units = sum(q for (c, loc), q in data["inventory"].items() if loc == "03") if inventory_valid else None
     projected_central = (central_units + sum(data["inbound"].values()) + total_qty) if central_units is not None and inbound_valid and total_qty is not None else None
     return {"target_round": target_round, "through_round": max(complete_rounds, default=0),

@@ -138,3 +138,36 @@ While testing the live app I noticed three problems:
 I also set readable colours for the sidebar's green and blue messages (they were 3.87:1, now at least 4.5:1).
 
 **Files changed:** `src/engine.py`, `streamlit_app.py`, `.streamlit/config.toml`, `tests/test_rounds_and_uploads.py` (new), `tests/test_ui.py`, `tests/test_engine.py`. In `test_engine.py`, detailed sales is now "current", because it covers every finished round. Round 9 has only started.
+
+---
+
+## Last fix: the app felt like "Push and Pull do nothing"
+
+**Status: Verified** (27 automated tests, real browser timing and upload checks)
+
+**Problem.** After I uploaded the final version and switched between Push and Pull in Round 9, the transfer table seemed not to change. The numbers were right, but every click made the app re-read all the Excel reports. On my test server a click took about 5 seconds, and the old table stayed on screen the whole time. The box with the Push vs Pull recommendation (and the "Both modes side by side" tables) also stay the same by design, because they compare both modes.
+
+**Fix.** `streamlit_app.py` now reads the reports once and reuses them (a click takes about 0.5 seconds). The cache key contains the uploaded file contents and the packaged files' timestamps, so a new upload is always read, and each visitor gets a private copy, so one visitor's upload never changes what another sees. I also added two plain sentences on screen: the recommendation box compares both modes, so it does not change; the choice in the sidebar changes the table below it.
+
+**Verification.** Time from click to updated table: about 5 seconds before, about 0.5 seconds after. A bad upload shows "Pending" for that visitor only, and a second visitor still sees 2,403 units. Removing the upload restores the normal plan, uploading the same file says "Nothing new", and a new Round 9 file moves the app to Round 10. All 27 tests pass, and the contrast check still shows at least 5.05:1.
+
+**Files changed:** `streamlit_app.py`, `REVISION_LOG.md`.
+
+---
+
+## Final full audit (every tab, every setting)
+
+**Status: Verified** (30 automated tests, including 330 page views; real browser contrast and speed checks)
+
+I asked for one last check of every tab. Opening every tab with every planning round, transfer mode and cycle found four more problems, now fixed:
+
+1. **Round review compared the forecast with an unfinished round.** Round 9 had only started, so its sales were 0 and the page showed a forecast error of 89,900% for Milk. Now it explains that the round is not finished and asks you to pick a finished round. Picking Round 4 compares the forecast made from Rounds 1 to 3 with the real Round 4 sales.
+2. **Finance + valuation mixed time periods.** In a past round, profit followed the round, but revenue, gross profit and bank cash still showed Round 7. All five figures now come from the end of the round before the one you plan, with a label saying which round.
+3. **Procurement said "No PO" when stock was unknown.** It now says "Pending inventory". "No PO needed" only appears when the need is really 0.
+4. **Final round plan showed a dash instead of a number** for ending stock in a past round. It now says "Pending".
+
+Smaller clean-ups: the Game rules tab now shows units (for example "EUR per purchase order"), the valuation chart is in the right order (R1 D01, D02 ... instead of D1, D10, D2), and it states the valuation formula from the course guide.
+
+The new test `tests/test_every_tab.py` opens all 10 tabs for every setting (330 page views). It checks for crashes, broken values and negative quantities, and checks that Push and Pull give different tables on both transfer tabs. One value is allowed to be negative: "Gross profit after fees" in the Push/Pull comparison. With a 1-day cycle, Push pays EUR 9,900 in transfer fees against EUR 9,836 of gross margin, so the result is really minus EUR 64.
+
+**Files changed:** `streamlit_app.py`, `src/engine.py`, `tests/test_every_tab.py` (new), `REVISION_LOG.md`, `TEST_RESULTS.md`, `README.md`, `BUILD_NOTE.md`.

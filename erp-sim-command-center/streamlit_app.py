@@ -5,13 +5,14 @@ session. It does not save student uploads to the server filesystem.
 """
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pandas as pd
 import streamlit as st
 
-from src.engine import PRODUCTS, REGIONS, build_plan, load_data
+from src.engine import BASELINE_DIR, PRODUCTS, REGIONS, build_plan, load_data
 
 
 ROOT = Path(__file__).resolve().parent
@@ -68,16 +69,27 @@ def percent(value: float | None) -> str:
     return "—" if value is None else f"{value * 100:.1f}%"
 
 
-def uploaded_data(files):
-    """Parse baseline plus current-session uploads without retaining uploaded files."""
-    if not files:
+@st.cache_resource(show_spinner=False, max_entries=6)
+def _parse_reports(blobs: tuple, baseline_stamp: tuple):
+    """Read the Excel reports ONCE. Clicking a dropdown used to re-read every workbook (about 5 seconds
+    on a slow server), so the old table stayed on screen and it looked as if nothing had changed.
+    The key holds the uploaded file contents and the packaged files' timestamps, so a new upload or an
+    edited file is always re-read."""
+    if not blobs:
         return load_data()
     with TemporaryDirectory(prefix="erpsim_upload_") as temp_dir:
         folder = Path(temp_dir)
-        for file in files:
-            safe_name = Path(file.name).name
-            (folder / safe_name).write_bytes(file.getvalue())
+        for name, content in blobs:
+            (folder / name).write_bytes(content)
         return load_data(folder)
+
+
+def uploaded_data(files):
+    """Packaged data plus this session's uploads. Uploaded files are held only in memory, never saved."""
+    blobs = tuple((Path(f.name).name, f.getvalue()) for f in (files or []))
+    stamp = tuple(sorted((p.name, p.stat().st_mtime_ns) for p in BASELINE_DIR.glob("*.xlsx")))
+    # A private copy per run, so one visitor can never change what another visitor sees.
+    return copy.deepcopy(_parse_reports(blobs, stamp))
 
 
 def planner_table(rows: list[dict]) -> pd.DataFrame:
@@ -212,6 +224,8 @@ def transfer_decision(plan: dict, show_trace: bool = True) -> None:
     if policy["why_equal"]:
         body += f'<br><b>Why the modes match:</b> {policy["why_equal"]}'
     st.markdown(body + "</div>", unsafe_allow_html=True)
+    st.caption("The box above compares BOTH modes, so it stays the same when you switch. "
+               "Your choice in the sidebar changes the table below.")
     shown = plan["mode"]
     st.markdown(f"**ZMB1B entries for {shown.title()}** ({ENTRY_LABEL[shown]}, every {plan['frequency']} days). "
                 f"Showing {shown.title()} because: {plan['mode_source'][0].lower() + plan['mode_source'][1:]}.")
@@ -332,7 +346,8 @@ def procurement_page(plan: dict) -> None:
     table = pd.DataFrame(
         [
             {"Product": r["product"], "Expected quantity": r["mrp"], "Reference unit cost": r["cost"],
-             "Estimated merchandise value": r["po_value"], "Action": "Review PO" if r["mrp"] else "No PO"}
+             "Estimated merchandise value": r["po_value"],
+             "Action": "Pending inventory" if r["mrp"] is None else ("Review PO" if r["mrp"] > 0 else "No PO needed")}
             for r in plan["rows"]
         ]
     )
@@ -353,6 +368,7 @@ def transfer_page(plan: dict, data: dict) -> None:
     transfer_decision(plan, show_trace="tp")
     if plan.get("policy"):
         st.subheader("Both modes side by side (ZMB1B entries)")
+        st.caption("These two tables are always shown together, so they do not change when you switch modes.")
         left, right = st.columns(2)
         with left:
             st.markdown("**Push:** quantity to send every cycle")
@@ -394,20 +410,25 @@ def pricing_page(plan: dict) -> None:
 
 
 def finance_page(plan: dict, valuations: list[dict]) -> None:
-    title("FINANCIAL MONITOR", "Finance + valuation", "Actual imported results are separated from forward planning estimates.")
+    title("FINANCIAL MONITOR", "Finance + valuation", "Actual SAP results, shown as they were at the end of the round before the one you plan.")
     finance = plan["financial"]
+    asof = plan.get("valuation_asof")
+    thru = finance.get("through_round")
     cols = st.columns(5)
-    cols[0].metric("Company valuation", eur(plan["company_value"]))
-    cols[1].metric("Cumulative profit", eur(finance.get("profit")))
-    cols[2].metric("Cumulative revenue", eur(finance.get("revenue")))
-    cols[3].metric("Gross profit", eur(finance.get("gross_profit")))
-    cols[4].metric("Bank cash", eur(finance.get("cash")))
+    kpi(cols[0], "Company valuation", eur(plan["company_value"]) if asof else "Not yet",
+        f"SAP value at end of Round {asof['round']}" if asof else "No round finished before this one")
+    note = f"SAP postings through Round {thru}" if thru else "No postings before this round"
+    kpi(cols[1], "Cumulative profit", eur(finance.get("profit")) if thru else "Not yet", note)
+    kpi(cols[2], "Cumulative revenue", eur(finance.get("revenue")) if thru else "Not yet", note)
+    kpi(cols[3], "Gross profit", eur(finance.get("gross_profit")) if thru else "Not yet", note)
+    kpi(cols[4], "Bank cash", eur(finance.get("cash")) if thru else "Not yet", note)
     if valuations:
-        history = pd.DataFrame(valuations)
-        history["Period"] = history.apply(lambda r: f"R{int(r['round'])} D{int(r['day'])}", axis=1)
-        st.subheader("Company valuation history")
-        st.line_chart(history.set_index("Period")["value"], color="#0b74de")
-    warning("The supplied files do not include the official valuation credit-rating and risk-rate lookup. The app reports imported actual valuation; it does not calculate a forward valuation.")
+        history = pd.DataFrame(valuations).sort_values(["round", "day"])
+        history["Period"] = history.apply(lambda r: f"R{int(r['round'])} D{int(r['day']):02d}", axis=1)
+        st.subheader("Company valuation history (all rounds in SAP)")
+        st.line_chart(history.set_index("Period")["value"], color="#0b63c4", x_label="Round and day", y_label="Valuation (EUR)")
+    st.caption("Company valuation in ERPsim = (profit / rounds played) x 8 / (7% market risk + company risk rate). "
+               "The app shows SAP's own valuation and does not forecast a future valuation.")
 
 
 def final_page(plan: dict) -> None:
@@ -437,23 +458,34 @@ def final_page(plan: dict) -> None:
     cols = st.columns(4)
     cols[0].metric("Expected revenue", eur(plan["expected_revenue"]))
     cols[1].metric("Expected gross profit", eur(plan["expected_gross_profit"]))
-    cols[2].metric("Expected ending stock", f"{num(plan['expected_end_inventory'])} units")
+    cols[2].metric("Expected ending stock", "Pending" if plan["expected_end_inventory"] is None
+                   else f"{num(plan['expected_end_inventory'])} units")
     cols[3].metric("Estimated cash need", eur(cash_need(plan)) if cash_need(plan) is not None else "Pending")
 
 
 def review_page(plan: dict, data: dict) -> None:
-    title("LEARN AFTER EACH ROUND", "Round review", "Compare the prepared forecast with actual sales after a round finishes.")
-    actuals = data["round_totals"].get(plan["target_round"], {})
+    title("LEARN AFTER EACH ROUND", "Round review", "Compare the forecast the app would have prepared with what really sold.")
+    target = plan["target_round"]
+    finished = target in data.get("complete_rounds", [])
+    actuals = data["round_totals"].get(target, {}) if finished else {}
     rows = []
     for row in plan["rows"]:
-        actual = actuals.get(row["code"])
+        actual = actuals.get(row["code"]) if finished else None
         error = None if actual is None else (row["forecast"] - actual) / max(1, actual)
         rows.append({"Product": row["product"], "Forecast prepared": row["forecast"], "Actual sales": actual,
-                     "Forecast error": None if error is None else error * 100, "Status": "Awaiting actual" if actual is None else "Compare and adjust"})
+                     "Forecast error": None if error is None else error * 100,
+                     "Status": ("Round not finished yet" if not finished else
+                                "Forecast too high" if error > 0.15 else "Forecast too low" if error < -0.15 else "Close (within 15%)")})
+    if not finished:
+        st.info(f"Round {target} has not finished yet, so there is nothing to compare. "
+                f"Choose a finished round (2 to {max(data.get('complete_rounds', [1]))}) in **Planning round** to see "
+                "how the forecast compared with what really sold.")
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={
         "Forecast error": st.column_config.NumberColumn(format="%.1f%%")
     })
-    st.caption("Partial target-round sales are not used in the forecast. Review actuals only after the round completes.")
+    if finished:
+        st.caption(f"Forecast prepared from Rounds 1 to {target - 1} only; actual sales are the full Round {target}. "
+                   "Positive error means the forecast was higher than sales.")
 
 
 def data_page(data: dict) -> None:
@@ -472,10 +504,20 @@ def rules_page(data: dict) -> None:
     title("REFERENCE & ASSUMPTIONS", "Game rules", "Workbook rules and planning assumptions are shown separately.")
     rules = data.get("rules", {})
     items = []
-    for key, fallback in [("Lead_Time", "1–2 days"), ("PO_Cost", "1,000"), ("Transfer_Cost", "100"),
-                          ("Storage_Capacity", "4,000"), ("Storage_Extra_Capacity_Cost", "300")]:
+    for key, fallback, unit in [
+            ("Lead_Time", "1-2 days", "from purchase order to goods receipt"),
+            ("PO_Cost", "1000", "EUR per purchase order"),
+            ("Transfer_Cost", "100", "EUR per region per transfer"),
+            ("Storage_Capacity", "4000", "units, all locations together"),
+            ("Storage_Extra_Capacity_Cost", "300", "EUR per extra 1,000 units per day")]:
         source = rules.get(key, {})
-        items.append({"Rule": key.replace("_", " "), "Value": source.get("value") or source.get("detail") or fallback})
+        value = str(source.get("value") or fallback)
+        try:
+            value = f"{float(value):,.0f}"
+        except ValueError:
+            pass
+        items.append({"Rule": key.replace("_", " "), "Value": value, "Unit": unit,
+                      "Source": "Game rules sheet (OData)" if source else "Course job aid"})
     st.dataframe(pd.DataFrame(items), hide_index=True, width="stretch")
     st.subheader("Planning assumptions")
     st.write("Forecast: three latest complete rounds weighted 20% / 30% / 50%.")

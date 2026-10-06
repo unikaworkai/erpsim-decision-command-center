@@ -11,9 +11,9 @@ Live app: https://erpsim-decision-command-center-vicd6jnz7ngn5azcg88vnt.streamli
 
 **Revision 2: Push and Pull.** Switching the mode gave identical numbers. I asked the assistant to trace it: the code read the mode but never used it, and its Pull number would have made SAP subtract regional stock twice. Now Push is the quantity to send every cycle and Pull is the target level to keep (course slides 13 and 14). The app simulates both on the same demand and recommends one. The purchase plan correctly stays the same in both modes.
 
-**Also found in my own testing and fixed:** a past round used today's stock, the valuation and profit cards ignored the planning round (they now match SAP and the course formula), and a sales upload replaced older rounds.
+**Also found in my own testing and fixed:** a past round used today's stock, the finance figures ignored the planning round (they now match SAP and the course formula), Round review compared with an unfinished round, and a sales upload replaced older rounds.
 
-**Three checks** (27 automated tests also pass; details in TEST_RESULTS.md):
+**Three checks** (30 automated tests also pass, including every tab with every setting; details in TEST_RESULTS.md):
 
 | Check | Expected | Actual |
 |---|---|---|

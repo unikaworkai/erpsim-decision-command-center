@@ -105,7 +105,7 @@ From the `erp-sim-command-center` folder, with the virtual environment active:
 python3 -m unittest discover -s tests
 ```
 
-27 tests run: the engine, Push and Pull, invalid inputs, past rounds and uploads, and the real sidebar controls through Streamlit's test runner. They take about one to two minutes. The results, with hand arithmetic and my own Excel recheck, are in [TEST_RESULTS.md](erp-sim-command-center/TEST_RESULTS.md). The two revisions are explained in [REVISION_LOG.md](erp-sim-command-center/REVISION_LOG.md), and the one-page summary is [BUILD_NOTE.md](erp-sim-command-center/BUILD_NOTE.md).
+30 tests run: the engine, Push and Pull, invalid inputs, past rounds and uploads, the real sidebar controls, and every tab with every planning round, transfer mode and cycle (330 page views). They take about two minutes. The results, with hand arithmetic and my own Excel recheck, are in [TEST_RESULTS.md](erp-sim-command-center/TEST_RESULTS.md). The two revisions are explained in [REVISION_LOG.md](erp-sim-command-center/REVISION_LOG.md), and the one-page summary is [BUILD_NOTE.md](erp-sim-command-center/BUILD_NOTE.md).
 
 ## Rules the app follows
 
@@ -129,7 +129,7 @@ python3 -m unittest discover -s tests
 - `erp-sim-command-center/streamlit_app.py`: the app (screens and layout).
 - `erp-sim-command-center/src/engine.py` and `src/transfer_policy.py`: the calculations.
 - `erp-sim-command-center/data/`: packaged team data (`baseline`) and the invalid test files (`test_inputs`).
-- `erp-sim-command-center/tests/`: the 27 automated tests.
+- `erp-sim-command-center/tests/`: the 30 automated tests.
 - `.streamlit/config.toml`: the colour theme (readable text on every screen).
 - `erp-sim-command-center/app.py`, `static/` and `cloud_app.py`: the first local version and an earlier deployment file. They are not used by the live app.
 

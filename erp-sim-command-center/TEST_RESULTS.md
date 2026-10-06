@@ -1,6 +1,6 @@
 # Test results
 
-Last run: 5 October 2026, Streamlit 1.65, Python 3.12. **27 automated tests: all passed.**
+Last run: 5 October 2026, Streamlit 1.65, Python 3.12. **30 automated tests: all passed.**
 
 How to run them yourself (from the `erp-sim-command-center` folder):
 
@@ -114,6 +114,9 @@ No crash in any case. Tested by real browser upload for (a) and (c), and automat
 | Same sales file uploaded again | Packaged ZVA05 uploaded | No change, and the sidebar says so | "Nothing new" message, same plan | Pass |
 | Partial sales upload | A file with only Round 1 | Older rounds stay | Rounds 1 to 8 still complete | Pass |
 | New round uploaded | A file with a full Round 9 | Plan moves to Round 10 | Round 10 planner, based on 9 rounds | Pass |
+| Every tab, every setting | All 10 tabs x Planning rounds 2 to 9 x Auto/Pull/Push, plus cycles 1, 3 and 5 in Round 9 (330 page views, `tests/test_every_tab.py`) | No crash, no "nan"/"None" values, no negative quantities | All clean | Pass |
+| Push and Pull on both transfer tabs | Command center and Stock transfer, PUSH then PULL | Different ZMB1B tables, Milk North 105 vs 133 | Same | Pass |
+| Speed of a click | Change Transfer mode in a real browser | Table updates within about 1 second | 0.6 to 0.8 seconds (before: about 5 seconds) | Pass |
 
 Hand arithmetic for C4 (one row per day; open = morning stock, ship = sent that day, arrives next morning):
 
