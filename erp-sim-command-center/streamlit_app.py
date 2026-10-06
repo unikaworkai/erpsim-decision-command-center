@@ -44,7 +44,7 @@ def inject_styles() -> None:
           div[data-testid="stMetric"] { background: #ffffff; border: 1px solid #c9d6e8; border-radius: 8px; padding: .6rem .8rem; }
           div[data-testid="stMetric"] [data-testid="stMetricLabel"],
           div[data-testid="stMetric"] [data-testid="stMetricLabel"] p { color: #4a5b73; }
-          div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #172b4d; }
+          div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #172b4d; font-size: clamp(1.3rem, 1.9vw, 2.1rem); }
           .stDownloadButton button, .stButton button { border-radius: 6px; }
         </style>
         """,
