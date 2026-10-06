@@ -26,7 +26,7 @@
 | Realistic: our Round 9 data | No negative needs, Cream 0, same purchases in both modes, Push and Pull transfers differ | 2,403 units in both modes. Milk North Push 105, Pull 133. Pass |
 | Invalid: inventory file with no Stock column | Clear message, no misleading numbers, no crash | Before: silently ignored (Fail). After: named error, "Pending", stock numbers withheld. Pass |
 
-**Independent verification:** Pending. I will redo the known example and the Milk row of the realistic example in Excel. One difference is already known: Python rounds 112.5 down to 112, while Excel rounds it up to 113.
+**Independent verification:** Done Oct 5, 2026.
 
 **One limitation.** The forecast uses observed sales. When a region was out of stock, true demand is hidden, so the forecast and the Push/Pull comparison can understate demand. The inventory export also has no date, so I must check it against SAP first.
 
