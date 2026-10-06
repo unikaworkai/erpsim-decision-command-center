@@ -26,6 +26,15 @@ class UITests(unittest.TestCase):
         self.assertEqual(int(zmb_pull.loc[zmb_pull.Product == "Milk", "North"].iloc[0]), 133)
         self.assertTrue(any("PUSH" in c.value for c in push.caption))  # "Calculated just now for ... PUSH"
 
+    def test_changing_planning_round_in_ui_changes_kpis(self):
+        at = AppTest.from_file(APP, default_timeout=120).run()
+        latest = at.metric[0].value
+        at.sidebar.selectbox[0].select(4).run()            # "Planning round"
+        self.assertFalse(at.exception, at.exception)
+        self.assertEqual(at.metric[0].value, "€1,221,778")  # SAP valuation at end of round 3
+        self.assertNotEqual(at.metric[0].value, latest)
+        self.assertEqual(at.metric[2].value, "Pending")      # no stock from after round 8 in a replay
+
     def test_auto_shows_recommendation(self):
         at = self.run_with("Auto")
         self.assertTrue(any("Use PULL" in m.value for m in at.markdown))

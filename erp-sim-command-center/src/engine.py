@@ -1,7 +1,7 @@
 """Deterministic ERPsim workbook reader and next-round planning rules."""
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean, pstdev
 import math
@@ -140,6 +140,26 @@ def _explain_unknown(path):
     return "unknown", f"its columns ({shown}) do not match any ERPsim report the app knows"
 
 
+def _finance(rows):
+    """Profit, revenue, cash from financial postings, plus cumulative profit at the end of each round."""
+    total_profit = gross_profit = revenue = cash = 0.0; latest_round = latest_step = 0
+    per_round = defaultdict(float)
+    for r in rows:
+        amt = _number(r.get("AMOUNT")); lvl = str(r.get("FS_LEVEL_1") or ""); acc = str(r.get("GL_ACCOUNT_NAME") or "")
+        rnd = _round(r.get("SIM_ROUND")) or 0
+        if lvl == "Income Statement":
+            total_profit -= amt; per_round[rnd] -= amt
+        if lvl == "Income Statement" and str(r.get("FS_LEVEL_2")) == "Revenues": revenue -= amt
+        if lvl == "Income Statement" and str(r.get("FS_LEVEL_2")) in {"Revenues", "Cost of Goods Sold"}: gross_profit -= amt
+        if acc == "Bank Cash Account": cash += amt
+        latest_round = max(latest_round, rnd); latest_step = max(latest_step, _round(r.get("SIM_STEP")) or 0)
+    cumulative, running = {}, 0.0
+    for rnd in sorted(per_round):
+        running += per_round[rnd]; cumulative[rnd] = running
+    return {"profit": total_profit, "gross_profit": gross_profit, "revenue": revenue, "cash": cash,
+            "through_round": latest_round, "through_day": latest_step, "profit_by_round": cumulative}
+
+
 def load_data(upload_dir=None):
     """Read the provided baseline workbooks, then apply matching uploaded exports."""
     paths = default_files()
@@ -150,6 +170,8 @@ def load_data(upload_dir=None):
         for path in sorted(Path(upload_dir).glob("*.xlsx"), key=lambda p:p.stat().st_mtime):
             typ = _file_report(path)
             uploaded.append((path, typ))
+            if typ in ("detailed_sales", "summary_sales"):
+                continue  # sales uploads are ADDED to the packaged sales below, never swapped in
             if typ != "unknown":
                 paths[typ] = path
 
@@ -160,7 +182,7 @@ def load_data(upload_dir=None):
             rejected.append({"file": path.name, "looks_like": kind, "reason": reason})
 
     data = {
-        "rejected_uploads": rejected,
+        "rejected_uploads": rejected, "upload_report": [],
         "sales": [], "inventory": {}, "inbound": defaultdict(float), "prices": {},
         "valuations": [], "financial": {}, "regional_round_sales": defaultdict(float),
         "round_totals": defaultdict(lambda: defaultdict(float)), "round_days": defaultdict(set),
@@ -197,20 +219,7 @@ def load_data(upload_dir=None):
                 c = _code(r.get("MATERIAL_NUMBER"))
                 if c: data["prices"][c] = _number(r.get("PRICE"))
         if "Financial_Postings" in sheet_names:
-            finance_rows = _rows(base, "Financial_Postings")
-            total_profit = 0.0; gross_profit = 0.0; revenue = 0.0; cash = 0.0
-            latest_round = 0; latest_step = 0
-            for r in finance_rows:
-                amt = _number(r.get("AMOUNT")); lvl = str(r.get("FS_LEVEL_1") or ""); acc = str(r.get("GL_ACCOUNT_NAME") or "")
-                total_profit -= amt if lvl == "Income Statement" else 0
-                if lvl == "Income Statement" and str(r.get("FS_LEVEL_2")) == "Revenues": revenue -= amt
-                if lvl == "Income Statement" and str(r.get("FS_LEVEL_2")) in {"Revenues", "Cost of Goods Sold"}: gross_profit -= amt
-                if acc == "Bank Cash Account": cash += amt
-                latest_round = max(latest_round, _round(r.get("SIM_ROUND")) or 0)
-                latest_step = max(latest_step, _round(r.get("SIM_STEP")) or 0)
-            data["financial"] = {"profit": total_profit, "gross_profit": gross_profit,
-                                 "revenue": revenue, "cash": cash,
-                                 "through_round": latest_round, "through_day": latest_step}
+            data["financial"] = _finance(_rows(base, "Financial_Postings"))
             data["has_financial"] = True
         if "Current_Game_Rules" in sheet_names:
             for r in _rows(base, "Current_Game_Rules"):
@@ -220,33 +229,66 @@ def load_data(upload_dir=None):
         data["has_po"] = bool(data["inbound"])
 
     # Specific reports supplied beside the all-round source extend/refresh it.
-    sales_path = paths.get("detailed_sales") or paths.get("sales_round8")
-    if sales_path:
-        existing = {(s["round"], s["day"], s["product"], s["region"], s["quantity"], s["revenue"]) for s in data["sales"]}
-        for r in _rows(sales_path):
+    def _sales_key(rec):
+        return (rec["round"], rec["day"], rec["product"], rec["region"], round(rec["quantity"], 4), round(rec["revenue"], 2))
+
+    def _merge_detailed(path):
+        """Add rows not already in the data. A multiset is used, so two identical order lines
+        (a real thing in SAP) are both kept, but a file uploaded twice is not double counted."""
+        have = Counter(_sales_key(x) for x in data["sales"])
+        added = skipped = 0; rounds = set()
+        for r in _rows(path):
+            code = _code(r.get("Material") or r.get("MATERIAL_NUMBER")); rnd = _round(r.get("Round") or r.get("SIM_ROUND")); day = _round(r.get("Day") or r.get("SIM_STEP"))
+            if not (code and rnd and day):
+                continue
+            region = _region(r.get("Area") or r.get("Location") or r.get("STORAGE_LOCATION"))
+            rec = {"round": rnd, "day": day, "product": code, "region": region,
+                   "quantity": _number(r.get("Quantity") or r.get("QUANTITY")),
+                   "revenue": _number(r.get("Net Value") or r.get("NET_VALUE")),
+                   "cost": _number(r.get("Cost") or r.get("COST")),
+                   "price": _number(r.get("Net Price") or r.get("NET_PRICE"))}
+            rounds.add(rnd); key = _sales_key(rec)
+            if have[key] > 0:
+                have[key] -= 1; skipped += 1
+            else:
+                data["sales"].append(rec); added += 1
+        return added, skipped, rounds
+
+    def _merge_summary(path):
+        """Summary sales only fill round/day/product keys that have no detailed rows at all."""
+        existing_keys = {(x["round"], x["day"], x["product"]) for x in data["sales"]}
+        summary = defaultdict(float); rounds = set()
+        for r in _rows(path):
             code = _code(r.get("Material") or r.get("MATERIAL_NUMBER")); rnd = _round(r.get("Round") or r.get("SIM_ROUND")); day = _round(r.get("Day") or r.get("SIM_STEP"))
             if code and rnd and day:
-                region = _region(r.get("Area") or r.get("Location") or r.get("STORAGE_LOCATION"))
-                rec = {"round": rnd, "day": day, "product": code, "region": region,
-                       "quantity": _number(r.get("Quantity") or r.get("QUANTITY")),
-                       "revenue": _number(r.get("Net Value") or r.get("NET_VALUE")),
-                       "cost": _number(r.get("Cost") or r.get("COST")),
-                       "price": _number(r.get("Net Price") or r.get("NET_PRICE"))}
-                key = (rec["round"], rec["day"], rec["product"], rec["region"], rec["quantity"], rec["revenue"])
-                if key not in existing: data["sales"].append(rec); existing.add(key)
-    # Summary sales is a safe fallback for round/day/product keys not present in detailed sales.
-    # This lets later summary-only exports extend the history without duplicating the provided detail.
-    summary_path = paths.get("summary_sales")
-    if summary_path:
-        existing_keys = defaultdict(float)
-        for s in data["sales"]: existing_keys[(s["round"],s["day"],s["product"])] += s["quantity"]
-        summary = defaultdict(float)
-        for r in _rows(summary_path):
-            code = _code(r.get("Material") or r.get("MATERIAL_NUMBER")); rnd = _round(r.get("Round") or r.get("SIM_ROUND")); day = _round(r.get("Day") or r.get("SIM_STEP"))
-            if code and rnd and day: summary[(rnd,day,code)] += _number(r.get("Quantity") or r.get("QUANTITY"))
-        for (rnd,day,code),qty in summary.items():
-            if (rnd,day,code) not in existing_keys:
-                data["sales"].append({"round":rnd,"day":day,"product":code,"region":None,"quantity":qty,"revenue":0,"cost":0,"price":0})
+                summary[(rnd, day, code)] += _number(r.get("Quantity") or r.get("QUANTITY")); rounds.add(rnd)
+        added = 0
+        for (rnd, day, code), qty in summary.items():
+            if (rnd, day, code) not in existing_keys:
+                data["sales"].append({"round": rnd, "day": day, "product": code, "region": None,
+                                      "quantity": qty, "revenue": 0, "cost": 0, "price": 0}); added += 1
+        return added, len(summary) - added, rounds
+
+    def _report(path, label, added, skipped, rounds):
+        span = ("no rounds found" if not rounds else f"Round {min(rounds)}" if min(rounds) == max(rounds)
+                else f"Rounds {min(rounds)} to {max(rounds)}")
+        if added:
+            detail = f"{span}. Added {added} new row(s); {skipped} were already in the data."
+        else:
+            detail = f"{span}. Nothing new: all {skipped} row(s) were already in the data, so results do not change."
+        data["upload_report"].append({"file": Path(path).name, "used_as": label, "detail": detail, "changed": bool(added)})
+
+    # Packaged sales first, then every uploaded sales file on top.
+    for sp in [p for p in (paths.get("detailed_sales") or paths.get("sales_round8"),) if p]:
+        _merge_detailed(sp)
+    for up, typ in uploaded:
+        if typ == "detailed_sales":
+            _report(up, "Detailed sales (ZVA05)", *_merge_detailed(up))
+    if paths.get("summary_sales"):
+        _merge_summary(paths["summary_sales"])
+    for up, typ in uploaded:
+        if typ == "summary_sales":
+            _report(up, "Summary sales (ZVC2)", *_merge_summary(up))
     if "pricing" in paths and paths["pricing"] != base:
         for r in _rows(paths["pricing"]):
             c=_code(r.get("Material") or r.get("MATERIAL_NUMBER"))
@@ -257,16 +299,7 @@ def load_data(upload_dir=None):
             if c and r.get("Price") is not None:
                 data["costs"][c]=_number(r.get("Price"),data["costs"].get(c,0))
     if "financial" in paths and paths["financial"] != base:
-        fr = _rows(paths["financial"])
-        total_profit=gross_profit=revenue=cash=0.0; latest_round=latest_step=0
-        for r in fr:
-            amt=_number(r.get("AMOUNT")); lvl=str(r.get("FS_LEVEL_1") or ""); acc=str(r.get("GL_ACCOUNT_NAME") or "")
-            if lvl=="Income Statement": total_profit-=amt
-            if lvl=="Income Statement" and str(r.get("FS_LEVEL_2"))=="Revenues": revenue-=amt
-            if lvl=="Income Statement" and str(r.get("FS_LEVEL_2")) in {"Revenues","Cost of Goods Sold"}: gross_profit-=amt
-            if acc=="Bank Cash Account": cash+=amt
-            latest_round=max(latest_round,_round(r.get("SIM_ROUND")) or 0); latest_step=max(latest_step,_round(r.get("SIM_STEP")) or 0)
-        data["financial"]={"profit":total_profit,"gross_profit":gross_profit,"revenue":revenue,"cash":cash,"through_round":latest_round,"through_day":latest_step}
+        data["financial"] = _finance(_rows(paths["financial"]))
         data["has_financial"]=True
     if "inventory" in paths and paths["inventory"] != base:
         data["inventory"] = {}; bad_cells = 0
@@ -302,6 +335,12 @@ def load_data(upload_dir=None):
                 val = _number(r.get("Company Valuation"))
                 data["valuations"].append({"round": rnd, "day": day, "value": val})
     # Prefer each actual sale price as price context when a current list is absent.
+    labels = {"inventory": "Inventory (ZMB52), replaces the packaged stock", "purchase_orders": "Purchase orders (ZME2N), replaces the packaged PO list",
+              "financial": "Financial report, replaces the packaged postings", "valuation": "Company valuation",
+              "all_rounds": "ERPsim OData workbook", "pricing": "Price list", "procurement_source": "Supplier prices (ZME13)"}
+    for up, typ in uploaded:
+        if typ in labels and not any(r["file"] == up.name for r in data["rejected_uploads"]):
+            data["upload_report"].append({"file": up.name, "used_as": labels[typ], "detail": "Read and used.", "changed": True})
     data["price_history"] = defaultdict(list)
     for s in data["sales"]:
         if s["price"] > 0: data["price_history"][s["product"]].append((s["round"], s["price"]))
@@ -317,7 +356,7 @@ def load_data(upload_dir=None):
     data["complete_rounds"] = [r for r in data["rounds"] if max(data["round_days"].get(r,{0})) >= 10]
     data["incomplete_rounds"] = [r for r in data["rounds"] if r not in data["complete_rounds"]]
     detailed_through = max((s["round"] for s in data["sales"] if s["region"]),default=0)
-    data["files"] = _file_status(paths, uploaded, data["max_round"], data["financial"].get("through_round",0),detailed_through)
+    data["files"] = _file_status(paths, uploaded, max(data["complete_rounds"], default=0), data["financial"].get("through_round",0),detailed_through)
     return data
 
 
@@ -346,11 +385,18 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
     complete_rounds = [r for r in hist_rounds if max(data["round_days"].get(r, {0})) >= 10]
     recent = complete_rounds[-3:]
     round_count = len(complete_rounds)
-    replay = target_round <= max(complete_rounds,default=0)
+    # Replay = planning a round that has already been played. Compare with ALL complete rounds in the data.
+    # (Before: compared with rounds before the target only, so replay was never switched on and today's
+    # stock was used to "plan" old rounds.)
+    latest_complete = max(data.get("complete_rounds", []), default=0)
+    replay = target_round <= latest_complete
     # Current inventory and open PO snapshots are undated, so omit them in historical replay.
     inventory_valid = data["has_inventory"] and not replay
     inbound_valid = data["has_po"] and not replay
-    last_value = data["valuations"][-1] if data["valuations"] else None
+    # KPIs follow the selected round: show SAP results at the end of the round before it.
+    as_of_round = target_round - 1
+    past_values = [v for v in data["valuations"] if v["round"] <= as_of_round]
+    last_value = max(past_values, key=lambda v: (v["round"], v["day"])) if past_values else None
     # Transfer mode is resolved after all products are calculated (see policy comparison below).
     # Before this fix, "auto" became PULL/PUSH here and the mode was never used again.
     requested_mode = str(transfer_mode or "auto").upper()
@@ -466,7 +512,13 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
     expected_gross_profit = sum(r["expected_gross_profit"] or 0 for r in rows) if all(r["expected_gross_profit"] is not None for r in rows) else None
     expected_end_inventory = sum(r["expected_end_inventory"] or 0 for r in rows) if all(r["expected_end_inventory"] is not None for r in rows) else None
     current_value = last_value["value"] if last_value else None
-    finance = data["financial"]
+    finance = dict(data["financial"])
+    by_round = finance.get("profit_by_round") or {}
+    known = [r for r in by_round if r <= as_of_round]
+    if known:
+        finance["profit"] = by_round[max(known)]; finance["through_round"] = max(known)
+    elif by_round:
+        finance["profit"] = None; finance["through_round"] = None
     central_units = sum(q for (c, loc), q in data["inventory"].items() if loc == "03") if inventory_valid else None
     projected_central = (central_units + sum(data["inbound"].values()) + total_qty) if central_units is not None and inbound_valid and total_qty is not None else None
     return {"target_round": target_round, "through_round": max(complete_rounds, default=0),
@@ -484,9 +536,13 @@ def build_plan(data, target_round, transfer_mode="auto", frequency=None):
             "projected_warehouse_units": round(projected_central) if projected_central is not None else None,
             "company_value": current_value, "valuation_asof": last_value,
             "financial": finance, "inventory_valid": inventory_valid, "inbound_valid": inbound_valid,
-            "data_warning": ("Historical replay excludes undated current inventory and purchase orders to prevent future-data leakage." if replay else
+            "as_of_round": as_of_round, "latest_complete": latest_complete,
+            "data_warning": ((f"Replay of Round {target_round}: the forecast uses only Rounds 1 to {target_round - 1}, and the KPIs show "
+                              f"SAP results at the end of Round {target_round - 1}. Your stock and open POs are from after Round "
+                              f"{latest_complete}, so MRP need, transfers and Push/Pull are not shown for a past round. "
+                              f"Pick Round {latest_complete + 1} to plan the next real round, or open Round review.") if replay else
                              "Inventory export has no round stamp; verify it is current before relying on transfer and MRP quantities." +
-                             (f" Financial postings are through round {finance.get('through_round')} while the latest complete sales round is {max(data.get('complete_rounds',[]),default=0)}; refresh the financial report." if finance.get('through_round',0) < max(data.get('complete_rounds',[]),default=0) else "") +
+                             (f" Financial postings are through round {data['financial'].get('through_round')} while the latest complete sales round is {latest_complete}; refresh the financial report." if (data['financial'].get('through_round') or 0) < latest_complete else "") +
                              (f" Round {data['incomplete_rounds'][-1]} is incomplete and excluded from the forecast." if data.get('incomplete_rounds') else "")),
             "valuation_direction": "Not calculated: official valuation credit-rating and risk-rate lookup is not in the supplied files."}
 

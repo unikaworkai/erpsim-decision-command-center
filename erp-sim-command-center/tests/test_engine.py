@@ -42,7 +42,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(p['through_round'],8)
         self.assertAlmostEqual(p['company_value'],1125700.90,places=2)
         freshness={f['name']:f['status'] for f in data['files']}
-        self.assertEqual(freshness['Detailed sales'],'Outdated')
+        self.assertEqual(freshness['Detailed sales'],'Uploaded')  # covers every COMPLETE round (1-8); round 9 has only started
         self.assertEqual(freshness['Financial'],'Outdated')
         self.assertEqual([r['product'] for r in p['rows']],[x['name'] for x in PRODUCTS])
         self.assertTrue(all(r['mrp'] is None or r['mrp']>=0 for r in p['rows']))

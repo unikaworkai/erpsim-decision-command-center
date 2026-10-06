@@ -115,3 +115,26 @@ Both are ZMB1B only. Neither changes MD61, MD01 or ME59N.
   - what happens when the main warehouse is short;
   - whether a small Pull shipment still costs €100.
 - The inventory export has no date, so I must check it against SAP before using it.
+
+---
+
+## Extra fixes found during my own testing (after Revisions 1 and 2)
+
+**Status: Verified** (27 automated tests, real browser checks)
+
+While testing the live app I noticed three problems:
+- Company valuation and Cumulative profit never changed when I picked another planning round.
+- Picking an old round (for example Round 4) still used today's stock.
+- Uploading a sales report seemed to do nothing.
+
+1. **Replay of past rounds never switched on.** The code compared the chosen round only with rounds before it, so "replay" was always off. Planning Round 4 used stock from after Round 8, and the warning talked about Round 9. Now a past round opens as a replay. It uses only Rounds 1 to (round minus 1) and shows "Pending" for stock-based numbers. The sidebar only offers Rounds 2 up to the next real round.
+2. **KPIs now follow the planning round.** Valuation and profit show the SAP results at the end of the round before the one you plan. I cross-checked these with the course formula, (profit / rounds) x 8 / (7% + 3%):
+   - End of Round 3: (45,816.66 / 3) x 8 / 0.10 = 1,221,777.60, the same as SAP.
+   - End of Round 7: (100,610.24 / 7) x 8 / 0.10 = 1,149,831.31, the same as SAP.
+
+   Push/Pull does not change these cards, which is correct, and the page now says so.
+3. **Sales uploads replaced the packaged sales instead of adding to them.** An upload with only some rounds made older rounds disappear without any message. Now every sales upload is added, and each real row is counted once. A file uploaded twice is not double counted, but two identical SAP order lines are both kept. The sidebar shows what each upload did, for example "Added 74 new rows" or "Nothing new, results do not change".
+
+I also set readable colours for the sidebar's green and blue messages (they were 3.87:1, now at least 4.5:1).
+
+**Files changed:** `src/engine.py`, `streamlit_app.py`, `.streamlit/config.toml`, `tests/test_rounds_and_uploads.py` (new), `tests/test_ui.py`, `tests/test_engine.py`. In `test_engine.py`, detailed sales is now "current", because it covers every finished round. Round 9 has only started.

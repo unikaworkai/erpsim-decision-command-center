@@ -86,13 +86,15 @@ From the `erp-sim-command-center` folder:
 python3 -m unittest discover -s tests -v
 ```
 
-The suite has 20 tests. Details and hand arithmetic are in [TEST_RESULTS.md](TEST_RESULTS.md). The changes are explained in [REVISION_LOG.md](REVISION_LOG.md).
+The suite has 27 tests. Details and hand arithmetic are in [TEST_RESULTS.md](TEST_RESULTS.md). The changes are explained in [REVISION_LOG.md](REVISION_LOG.md).
 
 ## Rules the app follows
 
 - **Purchasing and transfer mode are separate.** Push and Pull only change ZMB1B. They never change MD61, MD01 or ME59N, so the purchase plan is the same in both modes.
 - **Push and Pull follow the course definitions.** Push sends a fixed quantity every cycle. Pull keeps a target level, and SAP ships the gap (guide slides 13 and 14).
 - **Incomplete rounds are left out of the forecast.**
+- **Uploads add to the packaged data.** A sales upload is added to what is already there, and the sidebar says what it changed. If it has nothing new, the results stay the same, and the app tells you.
+- **Planning round.** The default is the next real round. An earlier round opens as a replay that only uses data from before that round, so the KPIs show SAP results at the end of the previous round.
 - **Unreadable files are reported, not hidden.** If an uploaded file can't be read, the app says so. If stock is unknown, it shows "Pending" instead of guessing.
 - **One price per product** across all regions.
 

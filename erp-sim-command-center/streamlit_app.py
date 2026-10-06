@@ -256,8 +256,13 @@ def command_page(plan: dict, data: dict) -> None:
     financial = plan["financial"]
     risk_count = sum(row["risk"] in {"High", "Watch"} for row in plan["rows"])
     cols = st.columns(5)
-    kpi(cols[0], "Company valuation", eur(plan["company_value"]), "Actual value imported from SAP")
-    kpi(cols[1], "Cumulative profit", eur(financial.get("profit")), f"Financial postings through R{financial.get('through_round') or '?'}")
+    asof = plan.get("valuation_asof")
+    kpi(cols[0], "Company valuation", eur(plan["company_value"]) if asof else "Not yet",
+        f"SAP value at end of Round {asof['round']}" if asof else "No round finished before this one")
+    prof_round = financial.get("through_round")
+    prof_note = (f"SAP postings through Round {prof_round}" +
+                 (" (latest report available)" if prof_round and prof_round < plan["as_of_round"] else "")) if prof_round else "No postings before this round"
+    kpi(cols[1], "Cumulative profit", eur(financial.get("profit")) if prof_round else "Not yet", prof_note)
     if plan["purchase_qty"] is None:
         kpi(cols[2], "Expected PO need", "Pending", "Needs a readable inventory report (ZMB52)")
     else:
@@ -268,6 +273,8 @@ def command_page(plan: dict, data: dict) -> None:
     else:
         kpi(cols[4], "Products to watch", "Pending", "Stock risk needs a readable inventory report")
     inputs_line(plan, data)
+    st.caption("What changes these cards: **Planning round** changes all of them. Valuation and profit are SAP "
+               "results, so Push/Pull and cycle days do not change them. Push/Pull changes only the Transfer plan below.")
     st.subheader("Purchase plan (MD61, MD01, ME59N)")
     st.caption("Quantities to BUY from the supplier. Transfer mode does not change these numbers: "
                "Push and Pull only decide how bought stock moves to the regions (ZMB1B, below).")
@@ -488,9 +495,17 @@ def main() -> None:
     with st.spinner("Reading reports and calculating the plan..."):
         data = uploaded_data(uploads)
 
+    for item in data.get("upload_report", []):
+        msg = f"**{item['file']}**: used as {item['used_as']}. {item['detail']}"
+        (st.sidebar.success if item["changed"] else st.sidebar.info)(msg)
+
     default_round = max(data["complete_rounds"], default=0) + 1
-    round_options = list(range(1, data["max_round"] + 2)) or [1]
-    target = st.sidebar.selectbox("Planning round", round_options, index=round_options.index(default_round) if default_round in round_options else len(round_options) - 1)
+    # Rounds 2 .. next round: a past round opens as a replay; you cannot plan further ahead than the next round.
+    round_options = list(range(2, default_round + 1)) or [1]
+    target = st.sidebar.selectbox(
+        "Planning round", round_options, index=len(round_options) - 1,
+        help=f"Round {default_round} is the next real round. Earlier rounds open as a replay that uses only the data "
+             "that existed at that time, so you can compare the forecast with what really sold (Round review).")
     mode = st.sidebar.selectbox("Transfer mode", ["Auto", "PULL", "PUSH"],
                                 help="Auto shows the mode the Push/Pull comparison recommends. Push and Pull only change ZMB1B, not purchasing.")
     frequency = st.sidebar.selectbox("Transfer cycle (days)", [1, 2, 3, 5], index=1)

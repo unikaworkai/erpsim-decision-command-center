@@ -1,6 +1,6 @@
 # Test results
 
-Last run: 5 October 2026, Streamlit 1.65, Python 3.12. **20 automated tests: all passed.**
+Last run: 5 October 2026, Streamlit 1.65, Python 3.12. **27 automated tests: all passed.**
 
 How to run them yourself (from the `erp-sim-command-center` folder):
 
@@ -38,7 +38,7 @@ Note: the old version of this file said "Independent verification: passed". That
 
 **Actual** (app): forecast 112, buffer 3, MD61 115, on hand 18, inbound 3, MRP need 94. Push North 17, South 11, West 7. Pull North 19, South 12, West 8.
 
-**Result: Pass.** **My independent check:Done on Oct 5, 2026 in Excel. All numbers matched, except MD61 was 116 and MRP need 95 because Excel rounds 112.5 up **
+**Result: Pass.** **My independent check: Done on 5 October 2026 in Excel (`Independent_Check_Unika.xlsx`, sheet Check1).** All numbers matched, except MD61 was 116 and MRP need 95, because Excel rounds 112.5 up (Python rounds it to 112).
 
 ---
 
@@ -73,7 +73,7 @@ Note: the old version of this file said "Independent verification: passed". That
 
 The app uses the unrounded daily rate, so it shows 104.8 and 132.2 inside. The rounded-up results are the same.
 
-**Result: Pass.** **My independent check: Done on Oct 5, 2026 in Excel. Milk row matched: 946, 281, 665, Push 105, Pull 133. Total 2403 units and 82,033.83 euros matched.**
+**Result: Pass.** **My independent check: Done on 5 October 2026 in Excel (sheet Milk).** I summed the raw exports myself: Milk sales 892, 1218, 711; regions 1643, 427, 751; stock 281; all POs Delivered. Results matched: MD61 946, need 665, Push North 105, Pull North 133, total 2,403 units and €82,033.83.
 
 ---
 
@@ -109,6 +109,11 @@ No crash in any case. Tested by real browser upload for (a) and (c), and automat
 | Stock conservation | Real data, all 4 scenarios, both modes | start + received minus sold = end, every product | Holds | Pass |
 | UI control reaches calculation | Real app, change the sidebar dropdown PUSH to PULL (`tests/test_ui.py`) | Purchase table identical. Milk North changes 105 to 133 | Same | Pass |
 | All 10 pages render | Real app | No error on any page | No error | Pass |
+| Past round opens as a replay | Planning round 4 | Uses only Rounds 1 to 3; no stock from after Round 8; KPIs at end of Round 3 | Valuation 1,221,778, profit 45,817, PO need "Pending" | Pass |
+| KPIs follow the round through the real UI | Change Planning round to 4 in the sidebar (`tests/test_ui.py`) | Valuation card changes | Changes from 1,125,701 to 1,221,778 | Pass |
+| Same sales file uploaded again | Packaged ZVA05 uploaded | No change, and the sidebar says so | "Nothing new" message, same plan | Pass |
+| Partial sales upload | A file with only Round 1 | Older rounds stay | Rounds 1 to 8 still complete | Pass |
+| New round uploaded | A file with a full Round 9 | Plan moves to Round 10 | Round 10 planner, based on 9 rounds | Pass |
 
 Hand arithmetic for C4 (one row per day; open = morning stock, ship = sent that day, arrives next morning):
 
@@ -121,7 +126,7 @@ Hand arithmetic for C4 (one row per day; open = morning stock, ship = sent that 
 | 5 | 160 / 100 / 20 / 140 | 160 / 200 minus 160 = 40 / 20 / 140 |
 | 6 | 240 / 0 / 20 / **220** | 180 / 0 / 20 / **160** |
 
-**My independent check of C4: Done on Oct 5, 2026 in Excel. Push 300 shipped, end 220. Pull 240 shipped, end 160.**
+**My independent check of C4 and C5: Done on 5 October 2026 in Excel (sheets C4 and C5).** C4: Push 300 shipped, end 220; Pull 240 shipped, end 160. C5: both 300 shipped, end 100.
 
 ---
 
